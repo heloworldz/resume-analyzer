@@ -1,45 +1,99 @@
 import React, { useState } from "react";
 import axios from "axios";
+import "./App.css"; // Styles
 
 function App() {
+  const [resumeText, setResumeText] = useState("");
   const [file, setFile] = useState(null);
-  const [text, setText] = useState("");
-  const [result, setResult] = useState("");
+  const [analysis, setAnalysis] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
 
-  const handleFileChange = (e) => setFile(e.target.files[0]);
-  const handleTextChange = (e) => setText(e.target.value);
+  // Analyze pasted text
+  const analyzeText = async () => {
+    if (!resumeText.trim()) {
+      setError("Please enter some resume text.");
+      return;
+    }
 
-  const uploadResume = async () => {
-    if (!file) return alert("Select a file first");
-    const formData = new FormData();
-    formData.append("resume", file);
-    const res = await axios.post("http://localhost:3000/upload", formData);
-    alert(res.data.message);
+    setLoading(true);
+    setError("");
+    try {
+      const response = await axios.post("http://localhost:3000/analyze", {
+        resumeText,
+      });
+      setAnalysis(response.data);
+    } catch (err) {
+      setError("Analysis failed. Please try again.");
+      console.error(err);
+    }
+    setLoading(false);
   };
 
-  const analyzeText = async () => {
-    const res = await axios.post("http://localhost:3000/analyze", { resumeText: text });
-    setResult(JSON.stringify(res.data, null, 2));
+  // Analyze uploaded PDF/DOCX file
+  const uploadResume = async () => {
+    if (!file) return alert("Select a file first!");
+
+    const formData = new FormData();
+    formData.append("resume", file);
+
+    setLoading(true);
+    setError("");
+    try {
+      const response = await axios.post(
+        "http://localhost:3000/analyze-file",
+        formData,
+        { headers: { "Content-Type": "multipart/form-data" } }
+      );
+      setAnalysis(response.data);
+    } catch (err) {
+      setError("File analysis failed. Check console.");
+      console.error(err);
+    }
+    setLoading(false);
   };
 
   return (
-    <div style={{ padding: "20px" }}>
-      <h2>AI-Powered Resume Analyzer</h2>
-      <div>
-        <h3>Upload Resume</h3>
-        <input type="file" onChange={handleFileChange} />
-        <button onClick={uploadResume}>Upload</button>
-      </div>
-      <div style={{ marginTop: "20px" }}>
-        <h3>Or Paste Resume Text</h3>
-        <textarea rows="10" cols="50" onChange={handleTextChange}></textarea>
-        <br />
-        <button onClick={analyzeText}>Analyze</button>
-      </div>
-      <div style={{ marginTop: "20px" }}>
-        <h3>Analysis Result</h3>
-        <pre>{result}</pre>
-      </div>
+    <div className="App">
+      <h1>AI-Powered Resume Analyzer</h1>
+
+      <section>
+        <h2>Paste Resume Text</h2>
+        <textarea
+          placeholder="Paste your resume here..."
+          value={resumeText}
+          onChange={(e) => setResumeText(e.target.value)}
+        />
+        <button onClick={analyzeText} disabled={loading}>
+          {loading ? "Analyzing..." : "Analyze Text"}
+        </button>
+      </section>
+
+      <hr />
+
+      <section>
+        <h2>Upload Resume (PDF / DOCX)</h2>
+        <input
+          type="file"
+          accept=".pdf,.docx"
+          onChange={(e) => setFile(e.target.files[0])}
+        />
+        <button onClick={uploadResume} disabled={loading}>
+          {loading ? "Analyzing..." : "Upload & Analyze"}
+        </button>
+      </section>
+
+      {error && <p className="error">{error}</p>}
+
+      {analysis && (
+        <div className="analysis-result">
+          <h2>Analysis Result</h2>
+          <p><strong>Education:</strong> {analysis.education}</p>
+          <p><strong>Experience:</strong> {analysis.experience}</p>
+          <p><strong>Skills:</strong> {analysis.skills.join(", ")}</p>
+          <p><strong>Summary:</strong> {analysis.summary}</p>
+        </div>
+      )}
     </div>
   );
 }
