@@ -1,43 +1,39 @@
-// backend/index.js
 const express = require("express");
 const cors = require("cors");
+const multer = require("multer");
+const fs = require("fs");
+const pdfParse = require("pdf-parse");
+const mammoth = require("mammoth");
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Example list of skills to search for
-const SKILLS = [
-  "Python",
-  "JavaScript",
-  "Node.js",
-  "React",
-  "MongoDB",
-  "Express",
-  "REST APIs",
-  "C++",
-  "Java",
-  "SQL"
-];
+// Set up multer for file uploads
+const upload = multer({ dest: "uploads/" });
 
-// Function to escape regex special characters
+// Skill list
+const SKILLS = ["Python", "JavaScript", "Node.js", "React", "MongoDB", "Express", "REST APIs", "C++", "Java", "SQL"];
+
+// Escape regex special characters
 function escapeRegex(string) {
   return string.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-// Function to estimate experience from text
+// Extract skills
+function extractSkills(text) {
+  return SKILLS.filter(skill => new RegExp(`\\b${escapeRegex(skill)}\\b`, "i").test(text));
+}
+
+// Estimate experience
 function estimateExperience(text) {
   const regexMonths = /(\d+)\s*months?/gi;
   const regexYears = /(\d+)\s*years?/gi;
   let totalMonths = 0;
 
   let match;
-  while ((match = regexMonths.exec(text)) !== null) {
-    totalMonths += parseInt(match[1]);
-  }
-  while ((match = regexYears.exec(text)) !== null) {
-    totalMonths += parseInt(match[1]) * 12;
-  }
+  while ((match = regexMonths.exec(text)) !== null) totalMonths += parseInt(match[1]);
+  while ((match = regexYears.exec(text)) !== null) totalMonths += parseInt(match[1]) * 12;
 
   const years = Math.floor(totalMonths / 12);
   const months = totalMonths % 12;
@@ -47,37 +43,50 @@ function estimateExperience(text) {
   return `${years} year${years > 1 ? "s" : ""} ${months} month${months > 1 ? "s" : ""}`;
 }
 
-// Function to extract skills from resume text
-function extractSkills(text) {
-  const foundSkills = SKILLS.filter(skill =>
-    new RegExp(`\\b${escapeRegex(skill)}\\b`, "i").test(text)
-  );
-  return foundSkills;
-}
-
-// Function to extract education (simple keyword search)
+// Extract education
 function extractEducation(text) {
   const eduMatches = text.match(/BCA|MCA|B\.Tech|M\.Tech|MBA|Ph\.D/i);
   return eduMatches ? eduMatches[0] : "Not found";
 }
 
-// Simple summary generator
+// Generate summary
 function generateSummary(skills, education, experience) {
   return `Strong in ${skills.join(", ")} with ${education} education and ${experience} experience.`;
 }
 
-app.post("/analyze", (req, res) => {
-  const { resumeText } = req.body;
-  if (!resumeText || resumeText.trim() === "") {
-    return res.status(400).json({ error: "Resume text cannot be empty." });
+// Route to analyze uploaded file
+app.post("/analyze-file", upload.single("resume"), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: "No file uploaded." });
+
+  let resumeText = "";
+
+  try {
+    if (req.file.mimetype === "application/pdf") {
+      const dataBuffer = fs.readFileSync(req.file.path);
+      const data = await pdfParse(dataBuffer);
+      resumeText = data.text;
+    } else if (req.file.mimetype ===
+               "application/vnd.openxmlformats-officedocument.wordprocessingml.document") {
+      const data = await mammoth.extractRawText({ path: req.file.path });
+      resumeText = data.value;
+    } else {
+      return res.status(400).json({ error: "Unsupported file format." });
+    }
+
+    const skills = extractSkills(resumeText);
+    const experience = estimateExperience(resumeText);
+    const education = extractEducation(resumeText);
+    const summary = generateSummary(skills, education, experience);
+
+    res.json({ skills, experience, education, summary });
+
+  } catch (err) {
+    console.error("File parsing error:", err);
+    res.status(500).json({ error: "Failed to parse resume." });
+  } finally {
+    // Clean up uploaded file
+    fs.unlinkSync(req.file.path);
   }
-
-  const skills = extractSkills(resumeText);
-  const experience = estimateExperience(resumeText);
-  const education = extractEducation(resumeText);
-  const summary = generateSummary(skills, education, experience);
-
-  res.json({ skills, experience, education, summary });
 });
 
 const PORT = process.env.PORT || 3000;
